@@ -1,6 +1,6 @@
 # Jitter-vs-Charge
 
-`jitter.py` computes TOA jitter (`std`) per pixel and then averages it per ASIC as a function of `DAC Charge`.
+`jitter.py` computes TOA jitter (`std`) per pixel and then averages it per ASIC as a function of Charge.
 
 ## What the script does
 
@@ -72,12 +72,3 @@ to relative paths, for example:
 
 - `output_path_pixels = "toa_output.csv"`
 - `output_path_jitter = "jitter_output.csv"`
-
-## Main constants in code
-
-- `N_CHARGES = 64`
-- `N_PIXELS = 225`
-- `N_ASICS = 4`
-- `N_INJ_ROWS = 15`
-- `INVALID_TOA_CODE = 127`
-- `MIN_SAMPLES_PER_PIXEL = 2`
