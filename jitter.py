@@ -1,3 +1,5 @@
+import argparse
+from pathlib import Path
 import matplotlib.pyplot as plt
 import numpy as np
 
@@ -12,20 +14,32 @@ MIN_SAMPLES_PER_PIXEL = 2
 
 TOA = [[[[] for _ in range(N_ASICS)] for _ in range(N_PIXELS)] for _ in range(N_CHARGES)]
 
-for i in range(N_INJ_ROWS):
-    for charge in range(N_CHARGES):
-        with open(f"/chargeScan/B_None_On_all_Inj_row_N_200_Vth_380_Q_12/pixelOn_all_pixelInj_row{i}/timing_data_dacCharge_{charge}.csv", newline='') as csvfile:
-            reader = csv.DictReader(csvfile, delimiter=",")
-            for row in reader:
-                pixel = int(row["pixel"])
-                asic = int(row["asic"])
-                toa = int(row["toa"])
-                crc = int(row["crc"])
-                if 0 <= pixel < N_PIXELS and 0 <= asic < N_ASICS:
-                    if crc == 0 and toa != INVALID_TOA_CODE:
-                        TOA[charge][pixel][asic].append(toa)
+def load_toa(input_dir: str):
+    toa_data = [[[[] for _ in range(N_ASICS)] for _ in range(N_PIXELS)] for _ in range(N_CHARGES)]
+    base_dir = Path(input_dir)
+
+    for i in range(N_INJ_ROWS):
+        for charge in range(N_CHARGES):
+            file_path = base_dir / f"pixelOn_all_pixelInj_row{i}" / f"timing_data_dacCharge_{charge}.csv"
+            with file_path.open(newline="") as csvfile:
+                reader = csv.DictReader(csvfile, delimiter=",")
+                for row in reader:
+                    pixel = int(row["pixel"])
+                    asic = int(row["asic"])
+                    toa = int(row["toa"])
+                    crc = int(row["crc"])
+                    if 0 <= pixel < N_PIXELS and 0 <= asic < N_ASICS:
+                        if crc == 0 and toa != INVALID_TOA_CODE:
+                            toa_data[charge][pixel][asic].append(toa)
+
+    return toa_data
 
 if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Compute TOA jitter from charge scan CSV files.")
+    parser.add_argument("--dir", dest="input_dir", required=True, help="Input directory with pixelOn_all_pixelInj_row* subdirectories.")
+    args = parser.parse_args()
+
+    TOA = load_toa(args.input_dir)
 
     pixel_std_toa = np.full((N_CHARGES, N_PIXELS, N_ASICS), np.nan)
 
