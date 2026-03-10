@@ -1,98 +1,102 @@
-import argparse
-from pathlib import Path
-import matplotlib.pyplot as plt
-import numpy as np
+# `jitter.py`
 
-import csv
+## Purpose
+`jitter.py` computes TOA jitter from charge-scan timing CSV files and generates:
+- a per-pixel TOA statistics table,
+- a per-charge/per-ASIC jitter summary,
+- a jitter-vs-charge plot.
 
-N_CHARGES = 64
-N_PIXELS = 225
-N_ASICS = 4
-N_INJ_ROWS = 15
-INVALID_TOA_CODE = 127
-MIN_SAMPLES_PER_PIXEL = 2
+It can optionally scale TOA by LSB values from a matching `delayScan/DB_results.csv`.
 
-TOA = [[[[] for _ in range(N_ASICS)] for _ in range(N_PIXELS)] for _ in range(N_CHARGES)]
+## Requirements
+- Python 3.8+
+- `numpy`
+- `matplotlib`
 
-def load_toa(input_dir: str):
-    toa_data = [[[[] for _ in range(N_ASICS)] for _ in range(N_PIXELS)] for _ in range(N_CHARGES)]
-    base_dir = Path(input_dir)
+Install dependencies if needed:
 
-    for i in range(N_INJ_ROWS):
-        for charge in range(N_CHARGES):
-            file_path = base_dir / f"pixelOn_all_pixelInj_row{i}" / f"timing_data_dacCharge_{charge}.csv"
-            with file_path.open(newline="") as csvfile:
-                reader = csv.DictReader(csvfile, delimiter=",")
-                for row in reader:
-                    pixel = int(row["pixel"])
-                    asic = int(row["asic"])
-                    toa = int(row["toa"])
-                    crc = int(row["crc"])
-                    if 0 <= pixel < N_PIXELS and 0 <= asic < N_ASICS:
-                        if crc == 0 and toa != INVALID_TOA_CODE:
-                            toa_data[charge][pixel][asic].append(toa)
+```bash
+pip install numpy matplotlib
+```
 
-    return toa_data
+## Input Data
 
-if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Compute TOA jitter from charge scan CSV files.")
-    parser.add_argument("--dir", dest="input_dir", required=True, help="Input directory with pixelOn_all_pixelInj_row* subdirectories.")
-    args = parser.parse_args()
+### Mandatory timing files
+The script searches under `--input-folder` for files named:
 
-    TOA = load_toa(args.input_dir)
+`timing_data_dacCharge_<DAC>.csv`
 
-    pixel_std_toa = np.full((N_CHARGES, N_PIXELS, N_ASICS), np.nan)
+Search order:
+1. `--input-folder/*/timing_data_dacCharge_*.csv`
+2. recursive fallback: `--input-folder/**/timing_data_dacCharge_*.csv`
 
-    mean_jitter_toa = np.full((N_CHARGES, N_ASICS), np.nan)
-    pixels_used = np.zeros((N_CHARGES, N_ASICS), dtype=int)
+Required columns in each timing CSV:
+- `pixel`
+- `asic`
+- `toa`
+- `crc`
 
-    for charge in range(N_CHARGES):
-        for asic in range(N_ASICS):
-            pixel_stds = []
-            for pixel in range(N_PIXELS):
-                values = TOA[charge][pixel][asic]
-                if len(values) >= MIN_SAMPLES_PER_PIXEL:
-                    pixel_std = np.std(values)
-                    pixel_std_toa[charge][pixel][asic] = pixel_std
-                    pixel_stds.append(pixel_std)
-            if pixel_stds:
-                mean_jitter_toa[charge][asic] = float(np.mean(pixel_stds))
-                pixels_used[charge][asic] = len(pixel_stds)
+Rows are ignored when:
+- `pixel` is outside `[0, 224]`
+- `crc != 0`
+- `toa == 127` (invalid TOA code)
 
-    plt.figure(figsize=(10, 6))
-    for asic in range(N_ASICS):
-        if np.all(np.isnan(mean_jitter_toa[:, asic])):
-            continue
-        plt.plot(range(N_CHARGES), mean_jitter_toa[:, asic], label=f"ASIC {asic}")
-    plt.xlabel("DAC Charge Code")
-    plt.ylabel("Mean per-pixel TOA std")
-    plt.title("Jitter (TOA std) vs Charge")
-    plt.legend()
-    plt.grid()
-    plt.show()
+### Optional delayScan LSB calibration
+If available, the script tries to find one `DB_results.csv` in delay scan results.
+Expected columns:
+- `asic`
+- `pixel`
+- `lsb`
 
-    output_path_pixels = "/toa_output.csv"
-    output_path_jitter = "/jitter_output.csv"
+If exactly one file is found, TOA is scaled as:
 
-    with open(output_path_pixels, "w", newline="") as outfile:
-        writer = csv.writer(outfile)
-        writer.writerow(["charge", "pixel", "asic", "count", "mean_toa", "std_toa"])
-        for charge in range(N_CHARGES):
-            for pixel in range(N_PIXELS):
-                for asic in range(N_ASICS):
-                    values = TOA[charge][pixel][asic]
-                    if values:
-                        writer.writerow([charge, pixel, asic, len(values), float(np.mean(values)), float(np.std(values))])
-                    else:
-                        writer.writerow([charge, pixel, asic, 0, "", ""])
+`toa_scaled = toa * lsb`
 
-    with open(output_path_jitter, "w", newline="") as outfile:
-        writer = csv.writer(outfile)
-        writer.writerow(["charge", "asic", "mean_jitter_std_toa", "pixels_used"])
-        for charge in range(N_CHARGES):
-            for asic in range(N_ASICS):
-                value = mean_jitter_toa[charge][asic]
-                if np.isnan(value):
-                    writer.writerow([charge, asic, "", pixels_used[charge][asic]])
-                else:
-                    writer.writerow([charge, asic, float(value), pixels_used[charge][asic]])
+with LSB lookup key based on parity:
+
+`asic_lsb = asic % 2`
+
+If no valid delayScan file is found (or multiple are found), the script falls back to raw TOA values.
+
+## Usage
+
+```bash
+python jitter.py \
+  --input-folder <charge_scan_results_folder> \
+  --output-dir <output_folder> \
+  [--output-prefix <prefix>] \
+  [--min-plot-charge <dac_charge_min>]
+```
+
+### Arguments
+- `--input-folder` (required): folder analyzed by `run_analysis.py`.
+- `--output-dir` (required): output folder for generated files.
+- `--output-prefix` (optional, default `""`): prefix added to all output filenames.
+- `--min-plot-charge` (optional, default `13`): minimum DAC charge shown on the plot. If no charges satisfy this threshold, all charges are plotted.
+
+## Outputs
+Files are created in `--output-dir`:
+
+1. `<prefix>toa_output.csv`
+- Columns: `charge,pixel,asic,count,mean_toa,std_toa`
+- Contains one row for every `(charge, pixel, asic)` combination.
+
+2. `<prefix>jitter_output.csv`
+- Columns: `charge,asic,mean_jitter_std_toa,pixels_used`
+- For each `(charge, asic)`, it averages pixel-level TOA standard deviations.
+- A pixel contributes only if it has at least 2 samples.
+
+3. `<prefix>jitter_vs_charge.pdf`
+- X-axis label: `Charge [fC]`
+- Y-axis label:
+  - `Jitter (TOA std) [ps]` when LSB scaling is applied
+  - `Jitter (TOA std)` otherwise
+- Charge conversion used for plotting:
+
+`charge_fC = dac_charge * 0.4 + 1`
+
+## Notes
+- Number of pixels is fixed to `225`.
+- Minimum samples per pixel for jitter contribution is fixed to `2`.
+- The script prints `[DEBUG]` messages for LSB file discovery/loading and `[INFO]` messages for saved outputs.
+
